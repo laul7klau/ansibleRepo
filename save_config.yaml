@@ -1,0 +1,24 @@
+---
+
+- name: Save config
+  hosts: all
+  gather_facts: no
+  connection: local
+  vars:
+    bigip_admin_credentials: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          66633631623165346134616230623038636239366633633033373238323232376663343537326162
+          6638653139663366366366646631316330666364353165360a366135343336346439386463333665
+          37316132323331623365356433363666393764383239333432666436623335323731653638336138
+          3363323763356238650a613331313636363034313631313536343636343163373637373363323532
+          3139
+
+  tasks:
+    - name: Save BIGIP config
+      bigip_config:
+        save: yes
+        provider:
+          user: admin
+          server: "{{ ansible_host }}"
+          password: "{{ bigip_admin_credentials }}"
+          validate_certs: no
