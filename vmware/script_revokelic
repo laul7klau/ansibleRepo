@@ -1,0 +1,7 @@
+LIC=`tmsh show sys license | grep Regis | awk '{print $3}'`
+
+if [ ! -z "$LIC" ] 
+then
+  echo "$LIC Revoking License on `date`" >> /var/tmp/lic
+  /usr/local/bin/SOAPLicenseClient --host ?.?.?.? --port 443 --basekey $LIC --revoke
+fi

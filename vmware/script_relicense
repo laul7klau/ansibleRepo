@@ -1,0 +1,4 @@
+LIC=`tail -1 /var/tmp/lic | awk '{print $1}'`
+
+/usr/local/bin/SOAPLicenseClient --host ??.??.??.?? --port 443 --basekey $LIC
+echo "License installed at `date`" >> /var/tmp/lic
