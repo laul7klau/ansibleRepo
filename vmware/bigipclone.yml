@@ -1,0 +1,167 @@
+---
+- name: Rename the VMs
+  hosts: "{{ vmgroup }}" 
+  gather_facts: no
+  vars:
+    there_are_poweredoff_vms: true
+    steps: 16
+    
+  tasks:
+    - name: "1/{{ steps }}: Get uuid and initial state of the VMs"
+      vmware_guest_info: 
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        datacenter: "{{ datacenter_name }}"
+        name: "{{ orig_vm_name }}"
+        folder: "{{ folder_name }}"
+        validate_certs: False
+      register: vm_facts 
+      delegate_to: localhost
+
+    - set_fact:
+        vm_uuid: "{{ vm_facts.instance.instance_uuid }}"
+        vm_state: "{{ vm_facts.instance.hw_power_status }}"
+
+    - debug:
+        msg: "{{ orig_vm_name }}: {{ vm_facts.instance.instance_uuid }} is {{ vm_state }}"
+
+    - name: "2/{{steps}}: Power on the bigip if not already started."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        datacenter: "{{ datacenter_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        validate_certs: no
+        folder: "{{ folder_name }}"
+        uuid: "{{ vm_uuid }}"
+        state: poweredon
+        use_instance_uuid: yes
+      delegate_to: localhost
+      when: there_are_poweredoff_vms|bool
+
+    - name: "3/{{steps}}: If BIG-IP was/were powered down, need to wait for it/them to boot to be able to ssh to it."
+      wait_for_connection:
+        timeout: 180 
+      register: elapsed_time
+      when: there_are_poweredoff_vms|bool
+
+    - name: Print time time taken for bigip to boot
+      debug:
+        msg: "{{ elapsed_time }}<--- Elasped time in seconds."
+      when: there_are_poweredoff_vms|bool
+
+    - name: "4/{{steps}}: After bigip is responsive, need to wait another 100 seconds for mcpd to init."
+      pause:
+        seconds: 100 
+      when: there_are_poweredoff_vms|bool
+
+    - name: "5/{{steps}}: Rename the bigip (requires the virtual machine's uuid)."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        datacenter: "{{ datacenter_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        validate_certs: no
+        folder: "{{ folder_name }}"
+        uuid: "{{ vm_uuid }}"
+        name: "{{ temp_vm_name }}"
+        state: present 
+        use_instance_uuid: yes 
+      delegate_to: localhost
+
+    - name: "6/{{steps}}: Copy script to remote host"
+      copy:
+        src: "./{{ relic_file }}"
+        dest: "/shared/{{ relic_file }}"
+        owner: root
+        group: root
+        mode: '0744'
+
+    - name: "7/{{steps}}: Copy script to remote host"
+      copy:
+        src: "./{{ revokelic_file }}"
+        dest: "/shared/{{ revokelic_file }}"
+        owner: root
+        group: root
+        mode: '0744'
+
+    - name: "8/{{steps}}: Revoke sys license. If license is already revoked, fine, ignore errors and continue."
+      shell: "/shared/{{ revokelic_file }}"
+      ignore_errors : yes
+
+    - name: "9/{{steps}}: Power off the temp vm. It's faster to clone a shut down vm. Replace the state with 'present' to clone in poweredon state."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username  }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ temp_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "{{ folder_name }}"
+        state: poweredoff
+        #state: present
+        force: yes
+      delegate_to: localhost
+
+    - name: "10/{{steps}}: Clone the template from temp_vm_name back to orig_vm_name"
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username  }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ orig_vm_name }}"
+        template: "{{ temp_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "{{ folder_name }}"
+        state: poweredon
+      delegate_to: localhost
+
+    - name: "11/{{steps}}: Power off or delete the temp vm"
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username  }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ temp_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "{{ folder_name }}"
+        #state: poweredoff
+        state: absent
+        force: yes
+      delegate_to: localhost
+
+    - name: "12/{{steps}}: Need to wait for bigip to boot to be able to ssh to it. Give up after 180 timeout."
+      wait_for_connection:
+        timeout: 180
+      register: elapsed_time
+
+    - name: Print time taken for bigip to boot.
+      debug:
+        msg: "{{ elapsed_time }}<--- Elapsed time in seconds. "
+
+    - name: "13/{{steps}}: After bigip is responsive, need to wait another 110 seconds for mcpd to init."
+      pause:
+        seconds: 110
+
+    - name: "14/{{steps}}: Load license again"
+      shell: "/shared/{{ relic_file }}"
+
+    - name: "15/{{steps}}: Pause for the last time to allow bigip to license and provision before shutting down if vm was previously poweredoff."
+      pause:
+        seconds: 60 
+      when: there_are_poweredoff_vms|bool
+
+    - name: "16/{{steps}}: Setting the power state of the VM to its original state."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        datacenter: "{{ datacenter_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        validate_certs: no
+        name: "{{ orig_vm_name }}"
+        folder: "{{ folder_name }}"
+        state: "{{ vm_state|lower }}" 
+      delegate_to: localhost
+      when: there_are_poweredoff_vms|bool
+

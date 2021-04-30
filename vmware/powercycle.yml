@@ -1,0 +1,105 @@
+---
+- name: "steps: Powercycle VMs. Power ON dead ones. PowerOff running ones, and toggle back to original state."
+  hosts: "{{ vmgroup }}" 
+  gather_facts: no
+  vars:
+    steps: 8
+    
+  tasks:
+    - name: "1/{{steps}}: Get initial state of the VMs"
+      vmware_guest_info: 
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        datacenter: "{{ datacenter_name }}"
+        name: "{{ orig_vm_name }}"
+        folder: "{{ folder_name }}"
+        validate_certs: False
+      register: vm_facts 
+      delegate_to: localhost
+
+    - set_fact:
+        vm_state: "{{ vm_facts.instance.hw_power_status }}"
+        vm_tools_installed: "{{vm_facts.instance.guest_tools_status }}"
+
+    - debug:
+        msg: "{{ orig_vm_name }}: vmware tools: {{ vm_tools_installed }} is {{ vm_state }}"
+
+    - name: "2/{{steps}}: First, power ON all VMs. Remember that VMs down for xx days will be gone too and need to be started for a while"
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username  }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ orig_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "{{ folder_name }}"
+        state: poweredon
+        force: yes
+      delegate_to: localhost
+
+    - name: "3/{{steps}}: Pause 2 seconds to let VMs load to grub"
+      pause:
+        seconds: 2 
+
+    - name: "4/{{steps}}: VMs that were powered ON in step 2, shut them back down while still at grub."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username  }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ orig_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "{{ folder_name }}"
+        state: poweredoff
+        force: yes
+      delegate_to: localhost
+      when: "vm_state == 'poweredOff'"
+
+    - name: "5/{{steps}}: If originally running, shutdown guests gracefully if vmware tools is running. Timeout after 90 secs."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username  }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ orig_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "{{ folder_name }}"
+        #state: poweredoff
+        state: shutdownguest 
+        state_change_timeout: 90 
+        force: yes
+      delegate_to: localhost
+      when: "vm_state == 'poweredOn' and vm_tools_installed == 'guestToolsRunning'"
+
+    - name: "6/{{steps}}: If originally running, force poweroff all guests abruptly if still alive."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username  }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ orig_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "{{ folder_name }}"
+        state: poweredoff
+        force: yes
+      delegate_to: localhost
+      when: "vm_state == 'poweredOn'"
+
+    - name: "7/{{steps}}: Pause another 5 seconds before proceeding."
+      pause:
+        seconds: 5 
+
+    - name: "8/{{steps}}: Forcing the power state of all VMs back to their original state if not so."
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        datacenter: "{{ datacenter_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        validate_certs: no
+        name: "{{ orig_vm_name }}"
+        folder: "{{ folder_name }}"
+        state: "{{vm_state|lower}}"
+        force: yes
+      delegate_to: localhost
+

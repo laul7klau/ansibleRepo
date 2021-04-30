@@ -1,0 +1,27 @@
+---
+- name: Test Ansible installation and connection to vCenter 
+  hosts: "{{ vmgroup }}"
+  gather_facts: no
+  vars:
+    there_are_poweredoff_vms: false 
+
+  tasks:
+    - name: Get uuid of the VMs
+      vmware_guest_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        datacenter: "{{ datacenter_name }}"
+        name: "{{ orig_vm_name }}"
+        folder: "{{ folder_name }}"
+        validate_certs: False
+      register: vm_facts
+      delegate_to: localhost
+
+    - set_fact:
+        vm_uuid: "{{ vm_facts.instance.instance_uuid }}"
+        vm_state: "{{ vm_facts.instance.hw_power_status }}"
+      when: doit
+
+    - debug:
+        msg: "{{ orig_vm_name }}: {{ vm_facts.instance.instance_uuid }} is {{ vm_state }}"

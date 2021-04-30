@@ -1,0 +1,66 @@
+---
+- name: Replaced linux VMs by cloning 
+  hosts: "{{ vmgroup }}"
+  gather_facts: no
+  vars:
+    
+  tasks:
+    - name: Get uuid of the VMs
+      vmware_guest_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        datacenter: "{{ datacenter_name }}"
+        name: "{{ orig_vm_name }}"
+        folder: "{{ folder_name }}"
+        validate_certs: False
+      register: vm_facts
+      delegate_to: localhost
+
+    - set_fact:
+        vm_uuid: "{{ vm_facts.instance.instance_uuid }}"
+        vm_state: "{{ vm_facts.instance.hw_power_status }}"
+
+    - debug:
+        msg: "uuid is {{ vm_facts.instance.instance_uuid }} and in state {{ vm_facts.instance.hw_power_status }}"
+
+    - name: Rename a virtual machine (requires the virtual machine's uuid)
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        datacenter: "{{ datacenter_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        validate_certs: no
+        folder: "{{ folder_name }}"
+        uuid: "{{ vm_uuid }}"
+        name: "{{ temp_vm_name }}"
+        state: poweredoff 
+        use_instance_uuid: yes
+      delegate_to: localhost
+
+    - name: Clone a new vm from the original vm 
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        datacenter: "{{ datacenter_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        validate_certs: False
+        name: "{{ orig_vm_name }}"
+        template: "{{ temp_vm_name }}"
+        folder: "{{ folder_name }}"
+        state: "{{ vm_state|lower }}" 
+      delegate_to: localhost
+
+    - name: Remove a virtual machine by its temp_name 
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        datacenter: "{{ datacenter_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        validate_certs: False 
+        name: "{{ temp_vm_name }}"
+        folder: "{{ folder_name }}"
+        state: absent
+        force: yes
+      delegate_to: localhost
+
